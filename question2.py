@@ -1,19 +1,18 @@
-from matplotlib.pylab import f
-import pandas as pd
-import numpy as np
-import seaborn as sns
+import joblib
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.svm import SVC
+import pandas as pd
+import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
+    accuracy_score,
     classification_report,
     confusion_matrix,
     roc_auc_score,
     roc_curve,
-    accuracy_score,
 )
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
 FEATURE_DATA = "features_selected.csv"
@@ -31,10 +30,11 @@ def load_feature_data(file_path):
     return X, y, le.classes_
 
 
-def scale_features(X):
+def scale_features(X_train, X_test):
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    return X_scaled
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    return X_train_scaled, X_test_scaled, scaler
 
 
 def partition_data(X, y, test_size=0.2, seed=LUCKY_SEED):
@@ -156,9 +156,12 @@ if __name__ == "__main__":
     print("Partitioning data...")
     X_train, X_test, y_train, y_test = partition_data(X, y)
     print("Scaling features...")
-    X_train = scale_features(X_train)
-    X_test = scale_features(X_test)
+    X_train, X_test, scaler = scale_features(X_train, X_test)
     print("Training models...")
     best_models = train_model(X_train, y_train, models)
     print("Evaluating models...")
     evaluate_model(best_models, X_test, y_test, class_names)
+    print("Saving models and scaler...")
+    for name, model in best_models.items():
+        joblib.dump(model, f"{name}_model.joblib")
+    joblib.dump(scaler, "scaler.joblib")
