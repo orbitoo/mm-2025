@@ -18,9 +18,6 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from skrebate import ReliefF
 
-# matching below
-# B007_0.mat
-# OR007@6_3.mat
 FAULT_TYPE_PAT = r"[/\\](B|IR|OR|N)(.*?)_\d\.mat$"
 FAULT_SIZE_PAT = rf"[/\\](\d{4})[/\\]"
 LOAD_PAT = r"_(\d)\.mat$"
@@ -42,7 +39,7 @@ PLOT_COLORS = sns.color_palette("Set2", 6)
 PLOT_DIR = "fig/question1"
 PLOT_SIGNAL_LOAD = 1
 DISTRIBUTION_PLOT_TYPE = "violin"
-SELECT_N_FEATURES = 10
+SELECT_N_FEATURES = 45
 
 
 def infer_fault_type(file_path):
@@ -193,7 +190,8 @@ def extract_fault_freq_features(
     bpfo = f_r * n / 2 * (1 - d / D)
     bpfi = f_r * n / 2 * (1 + d / D)
     bsf = f_r * D / d * (1 - (d / D) ** 2)
-    return {"bpfo": bpfo, "bpfi": bpfi, "bsf": bsf}
+    ftf = 1 / 2 * f_r * (1 - d / D)
+    return {"bpfo": bpfo, "bpfi": bpfi, "bsf": bsf, "ftf": ftf}
 
 
 def extract_hilbert_features(
@@ -288,6 +286,25 @@ def plot_denoised_signals(signals, df, sampling_rate=SAMPLING_RATE):
     plt.close()
 
 
+def plot_signals(signals, df, sampling_rate=SAMPLING_RATE):
+    # combine original and denoised plots
+    fig, axs = plt.subplots(len(signals), 1, figsize=(12, 8), sharex=True)
+    fig.suptitle("Time-Domain Waveforms of Different Fault Types", fontsize=16)
+    for i, (title, index) in enumerate(signals.items()):
+        original_signal = df["original_signal"].iloc[index]
+        denoised_signal = df["signal"].iloc[index]
+        time = np.arange(len(original_signal)) / sampling_rate
+        axs[i].plot(time, original_signal, label="Original", color="blue")
+        axs[i].plot(time, denoised_signal, label="Denoised", color="red")
+        axs[i].set_title(title)
+        axs[i].set_ylabel("Amplitude")
+        axs[i].legend()
+    axs[-1].set_xlabel("Time (s)")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # type: ignore
+    plt.savefig(f"{PLOT_DIR}/signal_combined.pdf")
+    plt.close()
+
+
 def plot_noise_signals(signals, df, sampling_rate=SAMPLING_RATE):
     fig, axs = plt.subplots(len(signals), 1, figsize=(12, 8), sharex=True)
     fig.suptitle("Time-Domain Waveforms of Different Fault Types (Noise)", fontsize=16)
@@ -369,7 +386,9 @@ def plot_inner_race_fault_envelope(
     plt.close()
 
 
-def plot_ball_fault_envelope(df, sampling_rate=SAMPLING_RATE, load=PLOT_SIGNAL_LOAD):
+def plot_ball_fault_envelope_bsf(
+    df, sampling_rate=SAMPLING_RATE, load=PLOT_SIGNAL_LOAD
+):
     idx = df[(df["fault_type"] == "B") & (df["load"] == load)].index[0]
     signal = df["signal"].iloc[idx]
     fault_freqs = extract_fault_freq_features(df["rpm"].iloc[idx])
@@ -381,7 +400,7 @@ def plot_ball_fault_envelope(df, sampling_rate=SAMPLING_RATE, load=PLOT_SIGNAL_L
     freqs = np.fft.fftfreq(n, 1 / sampling_rate)[: n // 2]
     plt.figure(figsize=(12, 6))
     plt.plot(freqs, envelope_fft)
-    plt.title("Envelope Spectrum of a Ball Fault Signal")
+    plt.title("Envelope Spectrum of a Ball Fault Signal (BSF)")
     plt.xlabel("Frequency (Hz)")
     plt.ylabel("Amplitude")
     plt.xlim(0, bsf * 4)
@@ -395,7 +414,39 @@ def plot_ball_fault_envelope(df, sampling_rate=SAMPLING_RATE, load=PLOT_SIGNAL_L
 
     plt.legend()
     plt.grid()
-    plt.savefig(f"{PLOT_DIR}/envelope_ball_fault.pdf")
+    plt.savefig(f"{PLOT_DIR}/envelope_ball_fault_bsf.pdf")
+    plt.close()
+
+
+def plot_ball_fault_envelope_ftf(
+    df, sampling_rate=SAMPLING_RATE, load=PLOT_SIGNAL_LOAD
+):
+    idx = df[(df["fault_type"] == "B") & (df["load"] == load)].index[0]
+    signal = df["signal"].iloc[idx]
+    fault_freqs = extract_fault_freq_features(df["rpm"].iloc[idx])
+    ftf = fault_freqs["ftf"]
+    analytic_signal = hilbert(signal)
+    envelope = np.abs(analytic_signal)  # type: ignore
+    n = len(signal)
+    envelope_fft = np.abs(fft(envelope - np.mean(envelope)))[: n // 2]  # type: ignore
+    freqs = np.fft.fftfreq(n, 1 / sampling_rate)[: n // 2]
+    plt.figure(figsize=(12, 6))
+    plt.plot(freqs, envelope_fft)
+    plt.title("Envelope Spectrum of a Ball Fault Signal (FTF)")
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Amplitude")
+    plt.xlim(0, ftf * 4)
+    for i in range(1, 4):
+        plt.axvline(
+            ftf * i,
+            color=PLOT_COLORS[i - 1],
+            linestyle="--",
+            label=f"{i}x FTF",
+        )
+
+    plt.legend()
+    plt.grid()
+    plt.savefig(f"{PLOT_DIR}/envelope_ball_fault_ftf.pdf")
     plt.close()
 
 
@@ -502,6 +553,23 @@ def perform_reliefF_feature_selection(features, labels, n_features=SELECT_N_FEAT
     plt.grid(True, axis="x", linestyle="--")
     plt.tight_layout()
     plt.savefig(f"{PLOT_DIR}/reliefF_top_{n_features}_features.pdf")
+    plt.close()
+
+    plt.figure(figsize=(12, 8))
+    feature_ranks = np.arange(1, len(scores_df) + 1)
+    feature_scores = scores_df["Score"].values
+    plt.plot(feature_ranks, feature_scores, marker="o", linestyle="-")  # type: ignore
+    plt.title("Feature Importance Scores By Rank (Elbow Method)", fontsize=16)
+    plt.xlabel("Feature Rank", fontsize=12)
+    plt.ylabel("Importance Score", fontsize=12)
+    plt.grid(True, linestyle="--")
+    for i, n in enumerate([30, 40, 50]):
+        plt.axvline(
+            x=n, color=PLOT_COLORS[i], linestyle="--", label=f"Potential Cutoff ({n})"
+        )
+    plt.legend()
+    plt.savefig(f"{PLOT_DIR}/reliefF_feature_importance_elbow.pdf")
+    plt.close()
 
     return scores_df
 
@@ -521,15 +589,31 @@ if __name__ == "__main__":
         feature_df.to_csv("features.csv", index=False)
     print("Plotting signals...")
     signals = get_different_fault_signals_index(df)
-    plot_original_signals(signals, df)
+    # plot_original_signals(signals, df)
     plot_denoised_signals(signals, df)
-    plot_noise_signals(signals, df)
+    # plot_noise_signals(signals, df)
+    # plot_signals(signals, df)
     print("Plotting outer race fault envelope...")
     plot_outer_race_fault_envelope(df)
     print("Plotting inner race fault envelope...")
     plot_inner_race_fault_envelope(df)
     print("Plotting ball fault envelope...")
-    plot_ball_fault_envelope(df)
+    plot_ball_fault_envelope_bsf(df)
+    plot_ball_fault_envelope_ftf(df)
+    features = feature_df.drop(columns=["fault_size", "load", "rpm"]).select_dtypes(
+        include=np.number
+    )
+    labels = feature_df.loc[features.index, "fault_type"]
+    print("Plotting PCA visualization...")
+    plot_pca_visualization(features, labels)
+    print("Plotting t-SNE visualization...")
+    plot_tsne_visualization(features, labels)
+    print("Performing ReliefF feature selection...")
+    perform_reliefF_feature_selection(features, labels)
+    feature_sub_df = feature_df[
+        ["fault_type", "fault_size", "load", "rpm"] + features.columns.to_list()
+    ]
+    feature_sub_df.to_csv("features_selected.csv", index=False)
     print("Plotting distributions...")
     plot_feature_map = {
         "time_kurtosis": (
@@ -573,16 +657,51 @@ if __name__ == "__main__":
             "Max Amplitude",
             "Envelope BSF Max Amplitude by Fault Type",
         ),
+        "wavelet_energy_0": (
+            "Fault Type",
+            "Normalized Energy",
+            "Wavelet Energy (Node 0) by Fault Type",
+        ),
+        "wavelet_energy_1": (
+            "Fault Type",
+            "Normalized Energy",
+            "Wavelet Energy (Node 1) by Fault Type",
+        ),
+        "wavelet_energy_7": (
+            "Fault Type",
+            "Normalized Energy",
+            "Wavelet Energy (Node 7) by Fault Type",
+        ),
+        "freq_rms": (
+            "Fault Type",
+            "RMS Frequency",
+            "Frequency-Domain RMS Frequency by Fault Type",
+        ),
+        "wavelet_std_1": (
+            "Fault Type",
+            "Standard Deviation",
+            "Wavelet Coefficient Std Dev (Node 1) by Fault Type",
+        ),
+        "time_peak": (
+            "Fault Type",
+            "Peak Value",
+            "Time-Domain Peak Value by Fault Type",
+        ),
+        "time_peak_to_peak": (
+            "Fault Type",
+            "Peak-to-Peak Value",
+            "Time-Domain Peak-to-Peak Value by Fault Type",
+        ),
+        "time_rms": (
+            "Fault Type",
+            "RMS Value",
+            "Time-Domain RMS Value by Fault Type",
+        ),
+        "time_std": (
+            "Fault Type",
+            "Standard Deviation",
+            "Time-Domain Standard Deviation by Fault Type",
+        ),
     }
     plot_distribution(feature_df, plot_feature_map)
     plot_distribution(feature_df, plot_feature_map, plot_type="box")
-    features = feature_df.drop(columns=["fault_size", "load", "rpm"]).select_dtypes(
-        include=np.number
-    )
-    labels = feature_df.loc[features.index, "fault_type"]
-    print("Plotting PCA visualization...")
-    plot_pca_visualization(features, labels)
-    print("Plotting t-SNE visualization...")
-    plot_tsne_visualization(features, labels)
-    print("Performing ReliefF feature selection...")
-    perform_reliefF_feature_selection(features, labels)
