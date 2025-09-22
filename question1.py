@@ -39,7 +39,7 @@ PLOT_COLORS = sns.color_palette("Set2", 6)
 PLOT_DIR = "fig/question1"
 PLOT_SIGNAL_LOAD = 1
 DISTRIBUTION_PLOT_TYPE = "violin"
-SELECT_N_FEATURES = 47
+SELECT_N_FEATURES = 42
 
 
 def infer_fault_type(file_path):
@@ -215,19 +215,19 @@ def extract_hilbert_features(
     fft_freqs = np.fft.fftfreq(n, 1 / sampling_rate)[: n // 2]
     peak_freq_index = np.argmax(envelope_fft_coeffs)
     features["envelope_peak_freq"] = fft_freqs[peak_freq_index]
-    for fault_name, fault_hz in fault_freqs.items():
-        lower_bound = fault_hz - freq_band
-        upper_bound = fault_hz + freq_band
-        indices_in_band = np.where(
-            (fft_freqs >= lower_bound) & (fft_freqs <= upper_bound)
-        )[0]
-        amps_in_band = envelope_fft_coeffs[indices_in_band]
-        max_amp = np.max(amps_in_band) if len(amps_in_band) > 0 else 0
-        features[f"envelope_{fault_name}_max_amp"] = max_amp
-        band_energy = np.sum(amps_in_band**2)
-        features[f"envelope_{fault_name}_band_energy"] = band_energy
-        band_mean_amp = np.mean(amps_in_band) if len(amps_in_band) > 0 else 0
-        features[f"envelope_{fault_name}_mean_amp"] = band_mean_amp
+    # for fault_name, fault_hz in fault_freqs.items():
+    #     lower_bound = fault_hz - freq_band
+    #     upper_bound = fault_hz + freq_band
+    #     indices_in_band = np.where(
+    #         (fft_freqs >= lower_bound) & (fft_freqs <= upper_bound)
+    #     )[0]
+    #     amps_in_band = envelope_fft_coeffs[indices_in_band]
+    #     max_amp = np.max(amps_in_band) if len(amps_in_band) > 0 else 0
+    #     features[f"envelope_{fault_name}_max_amp"] = max_amp
+    #     band_energy = np.sum(amps_in_band**2)
+    #     features[f"envelope_{fault_name}_band_energy"] = band_energy
+    #     band_mean_amp = np.mean(amps_in_band) if len(amps_in_band) > 0 else 0
+    #     features[f"envelope_{fault_name}_mean_amp"] = band_mean_amp
     return features
 
 
@@ -627,47 +627,6 @@ if __name__ == "__main__":
     feature_sub_df.to_csv("features_selected.csv", index=False)
     print("Plotting distributions...")
     plot_feature_map = {
-        "time_kurtosis": (
-            "Fault Type",
-            "Kurtosis",
-            "Time-Domain Kurtosis by Fault Type",
-        ),
-        "time_impulse_factor": (
-            "Fault Type",
-            "Impulse Factor",
-            "Time-Domain Impulse Factor by Fault Type",
-        ),
-        "time_margin_factor": (
-            "Fault Type",
-            "Margin Factor",
-            "Time-Domain Margin Factor by Fault Type",
-        ),
-        "time_shape_factor": (
-            "Fault Type",
-            "Shape Factor",
-            "Time-Domain Shape Factor by Fault Type",
-        ),
-        "freq_kurtosis": (
-            "Fault Type",
-            "Kurtosis",
-            "Frequency-Domain Kurtosis by Fault Type",
-        ),
-        "wavelet_entropy": ("Fault Type", "Entropy", "Wavelet Entropy by Fault Type"),
-        "envelope_bpfo_max_amp": (
-            "Fault Type",
-            "Max Amplitude",
-            "Envelope BPFO Max Amplitude by Fault Type",
-        ),
-        "envelope_bpfi_max_amp": (
-            "Fault Type",
-            "Max Amplitude",
-            "Envelope BPFI Max Amplitude by Fault Type",
-        ),
-        "envelope_bsf_max_amp": (
-            "Fault Type",
-            "Max Amplitude",
-            "Envelope BSF Max Amplitude by Fault Type",
-        ),
         "wavelet_energy_0": (
             "Fault Type",
             "Normalized Energy",
@@ -693,6 +652,11 @@ if __name__ == "__main__":
             "Standard Deviation",
             "Wavelet Coefficient Std Dev (Node 1) by Fault Type",
         ),
+        "envelope_peak": (
+            "Fault Type",
+            "Envelope Peak",
+            "Envelope Peak Value by Fault Type",
+        ),
         "time_peak": (
             "Fault Type",
             "Peak Value",
@@ -703,15 +667,15 @@ if __name__ == "__main__":
             "Peak-to-Peak Value",
             "Time-Domain Peak-to-Peak Value by Fault Type",
         ),
+        "envelope_entropy": (
+            "Fault Type",
+            "Entropy",
+            "Envelope Entropy by Fault Type",
+        ),
         "time_rms": (
             "Fault Type",
             "RMS Value",
             "Time-Domain RMS Value by Fault Type",
-        ),
-        "time_std": (
-            "Fault Type",
-            "Standard Deviation",
-            "Time-Domain Standard Deviation by Fault Type",
         ),
     }
     plot_distribution(feature_df, plot_feature_map)

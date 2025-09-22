@@ -34,7 +34,7 @@ def load_feature_data(file_path):
 def scale_features(X):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    return X_scaled, scaler
+    return X_scaled
 
 
 def partition_data(X, y, test_size=0.2, seed=LUCKY_SEED):
@@ -153,10 +153,11 @@ if __name__ == "__main__":
     }
     print("Loading feature data...")
     X, y, class_names = load_feature_data(FEATURE_DATA)
-    print("Scaling features...")
-    X_scaled, scaler = scale_features(X)
     print("Partitioning data...")
-    X_train, X_test, y_train, y_test = partition_data(X_scaled, y)
+    X_train, X_test, y_train, y_test = partition_data(X, y)
+    print("Scaling features...")
+    X_train = scale_features(X_train)
+    X_test = scale_features(X_test)
     print("Training models...")
     best_models = train_model(X_train, y_train, models)
     print("Evaluating models...")
