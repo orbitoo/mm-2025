@@ -15,8 +15,8 @@ from skimage.restoration import denoise_wavelet
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
-from tqdm import tqdm
 from skrebate import ReliefF
+from tqdm import tqdm
 
 FAULT_TYPE_PAT = r"[/\\](B|IR|OR|N)(.*?)_\d\.mat$"
 FAULT_SIZE_PAT = rf"[/\\](\d{4})[/\\]"
@@ -39,7 +39,7 @@ PLOT_COLORS = sns.color_palette("Set2", 6)
 PLOT_DIR = "fig/question1"
 PLOT_SIGNAL_LOAD = 1
 DISTRIBUTION_PLOT_TYPE = "violin"
-SELECT_N_FEATURES = 45
+SELECT_N_FEATURES = 47
 
 
 def infer_fault_type(file_path):
@@ -203,7 +203,18 @@ def extract_hilbert_features(
     envelope = np.abs(analytic_signal)  # type: ignore
     envelope_no_mean = envelope - np.mean(envelope)
     envelope_fft_coeffs = np.abs(fft(envelope_no_mean))[: n // 2]  # type: ignore
+    features["envelope_kurtosis"] = kurtosis(envelope)
+    features["envelope_skewness"] = skew(envelope)
+    features["envelope_entropy"] = -np.sum(
+        (envelope**2 / np.sum(envelope**2))
+        * np.log(envelope**2 / np.sum(envelope**2) + 1e-12)
+    )
+    features["envelope_rms"] = np.sqrt(np.mean(envelope**2))
+    features["envelope_std"] = np.std(envelope)
+    features["envelope_peak"] = np.max(envelope)
     fft_freqs = np.fft.fftfreq(n, 1 / sampling_rate)[: n // 2]
+    peak_freq_index = np.argmax(envelope_fft_coeffs)
+    features["envelope_peak_freq"] = fft_freqs[peak_freq_index]
     for fault_name, fault_hz in fault_freqs.items():
         lower_bound = fault_hz - freq_band
         upper_bound = fault_hz + freq_band
