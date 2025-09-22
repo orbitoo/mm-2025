@@ -1,0 +1,57 @@
+Building dataframe...
+Extracting features...
+Plotting signals...
+Plotting outer race fault envelope...
+Plotting inner race fault envelope...
+Plotting ball fault envelope...
+Plotting PCA visualization...
+PC1 解释的方差比例: 23.23%
+PC2 解释的方差比例: 18.76%
+前两个主成分累计解释的方差比例: 41.99%
+Plotting t-SNE visualization...
+Performing ReliefF feature selection...
+ReliefF Feature Importance Scores:
+                Feature     Score
+17     wavelet_energy_1  0.283453
+11             freq_rms  0.255598
+16     wavelet_energy_0  0.185645
+35        wavelet_std_1  0.179030
+23     wavelet_energy_7  0.166341
+53        wavelet_std_7  0.162661
+85        envelope_peak  0.150552
+6     time_peak_to_peak  0.150367
+5             time_peak  0.150183
+82     envelope_entropy  0.147421
+2              time_rms  0.146295
+83         envelope_rms  0.146265
+1              time_std  0.146233
+84         envelope_std  0.145663
+21     wavelet_energy_5  0.143287
+14        freq_skewness  0.143283
+15      wavelet_entropy  0.137421
+19     wavelet_energy_3  0.133450
+18     wavelet_energy_2  0.132020
+47        wavelet_std_5  0.122574
+8     time_shape_factor  0.122027
+32        wavelet_std_0  0.114066
+81    envelope_skewness  0.110557
+41        wavelet_std_3  0.109461
+9   time_impulse_factor  0.107052
+7    time_margin_factor  0.104746
+13        freq_kurtosis  0.103701
+4         time_kurtosis  0.075380
+38        wavelet_std_2  0.068887
+52   wavelet_kurtosis_6  0.055279
+80    envelope_kurtosis  0.055063
+79  wavelet_kurtosis_15  0.051055
+12             freq_std  0.048832
+61   wavelet_kurtosis_9  0.044913
+43   wavelet_kurtosis_3  0.040929
+64  wavelet_kurtosis_10  0.040185
+37   wavelet_kurtosis_1  0.039510
+76  wavelet_kurtosis_14  0.037491
+57   wavelet_skewness_8  0.036785
+3         time_skewness  0.036632
+86   envelope_peak_freq  0.036083
+10          freq_center  0.034576
+Plotting distributions...
