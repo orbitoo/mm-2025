@@ -13,6 +13,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
+from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
 FEATURE_DATA = "features_selected.csv"
@@ -23,11 +24,12 @@ PLOT_COLORS = sns.color_palette("Set2")
 
 def load_feature_data(file_path):
     df = pd.read_csv(file_path)
-    X = df.drop(columns=["fault_type", "fault_size", "load", "rpm"])
+    groups = df["source_index"]
+    X = df.drop(columns=["fault_type", "fault_size", "load", "rpm", "source_index"])
     y_str = df["fault_type"]
     le = LabelEncoder()
     y = le.fit_transform(y_str)
-    return X, y, le.classes_
+    return X, y, groups, le.classes_
 
 
 def scale_features(X_train, X_test):
@@ -37,18 +39,36 @@ def scale_features(X_train, X_test):
     return X_train_scaled, X_test_scaled, scaler
 
 
-def partition_data(X, y, test_size=0.2, seed=LUCKY_SEED):
-    return train_test_split(X, y, test_size=test_size, random_state=seed, stratify=y)
+def partition_data_by_group(X, y, groups, class_names, test_size=0.2, seed=LUCKY_SEED):
+    y_str = pd.Series(y).map(dict(enumerate(class_names)))
+    group_labels = pd.DataFrame({"group": groups, "label": y_str}).drop_duplicates()
+    train_groups, test_groups = train_test_split(
+        group_labels,
+        test_size=test_size,
+        random_state=seed,
+        stratify=group_labels["label"],
+    )
+    train_group_names = train_groups["group"].to_list()
+    test_group_names = test_groups["group"].to_list()
+    train_idx = groups[groups.isin(train_group_names)].index
+    test_idx = groups[groups.isin(test_group_names)].index
+    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
+    return X_train, X_test, y_train, y_test
 
 
 def train_model(X_train, y_train, model_config):
     best_models = {}
+    sample_weights = compute_sample_weight(class_weight="balanced", y=y_train)
     for name, (model, params) in model_config.items():
         print(f"---------- Training {name} ----------")
         grid_search = GridSearchCV(
             model, params, cv=5, n_jobs=-1, verbose=2, scoring="accuracy"
         )
-        grid_search.fit(X_train, y_train)
+        if name == "XGBoost":
+            grid_search.fit(X_train, y_train, sample_weight=sample_weights)
+        else:
+            grid_search.fit(X_train, y_train)
 
         best_models[name] = grid_search.best_estimator_
         print(f"Best parameters for {name}: {grid_search.best_params_}")
@@ -152,9 +172,11 @@ if __name__ == "__main__":
         ),
     }
     print("Loading feature data...")
-    X, y, class_names = load_feature_data(FEATURE_DATA)
+    X, y, groups, class_names = load_feature_data(FEATURE_DATA)
     print("Partitioning data...")
-    X_train, X_test, y_train, y_test = partition_data(X, y)
+    X_train, X_test, y_train, y_test = partition_data_by_group(
+        X, y, groups, class_names
+    )
     print("Scaling features...")
     X_train, X_test, scaler = scale_features(X_train, X_test)
     print("Training models...")
