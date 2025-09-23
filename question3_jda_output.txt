@@ -1,0 +1,45 @@
+Loading data...
+Running JDA...
+JDA | Iteration 1 / 20 completed.
+JDA | Iteration 2 / 20 completed.
+JDA | Iteration 3 / 20 completed.
+JDA | Iteration 4 / 20 completed.
+JDA | Iteration 5 / 20 completed.
+JDA | Iteration 6 / 20 completed.
+JDA | Iteration 7 / 20 completed.
+JDA | Iteration 8 / 20 completed.
+JDA | Iteration 9 / 20 completed.
+JDA | Iteration 10 / 20 completed.
+JDA | Iteration 11 / 20 completed.
+JDA | Iteration 12 / 20 completed.
+JDA | Iteration 13 / 20 completed.
+JDA | Iteration 14 / 20 completed.
+JDA | Iteration 15 / 20 completed.
+JDA | Iteration 16 / 20 completed.
+JDA | Iteration 17 / 20 completed.
+JDA | Iteration 18 / 20 completed.
+JDA | Iteration 19 / 20 completed.
+JDA | Iteration 20 / 20 completed.
+---------- Self-Training Refinement ----------
+Adding 27 high-confidence target samples to source.
+Re-training classifier on augmented dataset...
+Predicting labels for 949 low-confidence samples.
+---------- Final Predicted Labels ----------
+target_index
+A    OR
+B    IR
+C    IR
+D     N
+E     N
+F     N
+G    IR
+H     N
+I     N
+J    IR
+K     N
+L     N
+M     N
+N     N
+O    IR
+P     N
+Name: predicted_label, dtype: object
