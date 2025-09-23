@@ -22,11 +22,16 @@ FAULT_TYPE_PAT = r"[/\\](B|IR|OR|N)(.*?)_\d\.mat$"
 FAULT_SIZE_PAT = rf"[/\\](\d{4})[/\\]"
 LOAD_PAT = r"_(\d)\.mat$"
 SENSOR_TYPE = "DE"
+SOURCE_INDEX_PAT = r"(X\d+)_"
+TARGET_INDEX_PAT = r"([A-Z])\.mat$"
+TARGET_RPM = 600
 WINDOW_SIZE = 8192
 OVERLAP = 4096
 FAULT_SOURCE_DIR = "./data/source_domain/48kHz_DE_data"
 NORMAL_SOURCE_DIR = "./data/source_domain/48kHz_Normal_data"
+TARGET_DIR = "./data/target_domain"
 SAMPLING_RATE = 48000
+TARGET_SAMPLING_RATE = 32000
 WAVELET_TYPE = "sym8"
 WAVELET_LEVEL = 4
 DENOISE_WAVELET_TYPE = "sym8"
@@ -64,22 +69,42 @@ def infer_load(file_path):
 
 
 def infer_rpm(mat_data):
-    ks = mat_data.keys()
-    k = [key for key in ks if "RPM" in key][0]
+    ks = [key for key in mat_data.keys() if "RPM" in key]
+    if len(ks) == 0:
+        return -1
+    k = ks[0]
     return mat_data[k][0, 0]
 
 
-def read_signal(mat_data):
-    k = [key for key in mat_data.keys() if SENSOR_TYPE in key][0]
+def infer_source_index(str):
+    match = re.search(SOURCE_INDEX_PAT, str)
+    if match:
+        return match.group(1)
+    return "Unknown"
+
+
+def infer_target_index(file_path):
+    match = re.search(TARGET_INDEX_PAT, file_path)
+    if match:
+        return match.group(1)
+    return "Unknown"
+
+
+def read_signal(mat_data, filter=True):
+    if filter:
+        k = [key for key in mat_data.keys() if SENSOR_TYPE in key][0]
+    else:
+        k = [key for key in mat_data.keys() if not key.startswith("__")][0]
     signal = mat_data[k].flatten()
-    return signal
+    idx = infer_source_index(k)
+    return (signal, idx)
 
 
-def read_mat_file(file_path):
+def read_mat_file(file_path, filter=True):
     mat_data = scipy.io.loadmat(file_path)
-    signal = read_signal(mat_data)
+    signal, idx = read_signal(mat_data, filter=filter)
     rpm = infer_rpm(mat_data)
-    return signal, rpm
+    return signal, rpm, idx
 
 
 def denoise_signal(signal, wavelet=DENOISE_WAVELET_TYPE):
@@ -107,7 +132,7 @@ def build_dataframe(data_dir):
         for root, _, files in os.walk(dir):
             for file in files:
                 file_path = os.path.join(root, file)
-                signal, rpm = read_mat_file(file_path)
+                signal, rpm, idx = read_mat_file(file_path)
                 denoised_signal = denoise_signal(signal)
                 windows = sliding_window(signal)
                 windows_denoised = sliding_window(denoised_signal)
@@ -122,12 +147,35 @@ def build_dataframe(data_dir):
                         "fault_size": fault_size,
                         "load": load,
                         "rpm": rpm,
+                        "source_index": idx,
                     }
                 )
                 dfs.append(df)
 
     process_dir(FAULT_SOURCE_DIR)
     process_dir(NORMAL_SOURCE_DIR)
+    return pd.concat(dfs, ignore_index=True)
+
+
+def build_target_dataframe(data_dir):
+    dfs = []
+    for root, _, files in os.walk(data_dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            signal, rpm, _ = read_mat_file(file_path, filter=False)
+            idx = infer_target_index(file_path)
+            denoised_signal = denoise_signal(signal)
+            windows = sliding_window(signal)
+            windows_denoised = sliding_window(denoised_signal)
+            df = pd.DataFrame(
+                {
+                    "original_signal": windows,
+                    "signal": windows_denoised,
+                    "rpm": TARGET_RPM,
+                    "target_index": idx,
+                }
+            )
+            dfs.append(df)
     return pd.concat(dfs, ignore_index=True)
 
 
@@ -194,9 +242,7 @@ def extract_fault_freq_features(
     return {"bpfo": bpfo, "bpfi": bpfi, "bsf": bsf, "ftf": ftf}
 
 
-def extract_hilbert_features(
-    signal, fault_freqs, freq_band=2.0, sampling_rate=SAMPLING_RATE
-):
+def extract_hilbert_features(signal, sampling_rate=SAMPLING_RATE):
     features = {}
     n = len(signal)
     analytic_signal = hilbert(signal)
@@ -231,20 +277,19 @@ def extract_hilbert_features(
     return features
 
 
-def extract_features(signal, rpm):
-    fault_freqs = extract_fault_freq_features(rpm)
+def extract_features(signal, sampling_rate=SAMPLING_RATE):
     time_feats = extract_time_features(signal)
-    freq_feats = extract_freq_features(signal)
+    freq_feats = extract_freq_features(signal, sampling_rate=sampling_rate)
     wavelet_feats = extract_wavelet_features(signal)
-    envelope_feats = extract_hilbert_features(signal, fault_freqs)
+    envelope_feats = extract_hilbert_features(signal, sampling_rate=sampling_rate)
     features = {**time_feats, **freq_feats, **wavelet_feats, **envelope_feats}
     return features
 
 
-def build_feature_dataframe(df):
+def build_feature_dataframe(df, sampling_rate=SAMPLING_RATE):
     tqdm.pandas(desc="Extracting features")
     feature_df = df.progress_apply(
-        lambda row: extract_features(row["signal"], row["rpm"]), axis=1
+        lambda row: extract_features(row["signal"], sampling_rate=sampling_rate), axis=1
     ).apply(pd.Series)
     feature_df = df.join(feature_df)
     feature_df = feature_df.drop(columns=["signal", "original_signal"])
@@ -474,7 +519,7 @@ def plot_distribution(feature_df, plot_feature_map, plot_type=DISTRIBUTION_PLOT_
         plt.close()
 
 
-def plot_pca_visualization(features, labels):
+def plot_pca_visualization(features, labels, target_features=None):
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
     pca = PCA(n_components=2)
@@ -493,6 +538,23 @@ def plot_pca_visualization(features, labels):
         s=80,
         edgecolor="white",
     )
+    if target_features is not None:
+        target_features_scaled = scaler.transform(target_features)
+        target_principal_components = pca.transform(target_features_scaled)
+        pca_df_target = pd.DataFrame(
+            data=target_principal_components, columns=["PC1", "PC2"]
+        )
+        pca_df_target["Domain"] = "Target"
+        sns.scatterplot(
+            x="PC1",
+            y="PC2",
+            style="Domain",
+            data=pca_df_target,
+            markers=["X"],
+            color="black",
+            s=80,
+            edgecolor="white",
+        )
     plt.title("PCA of the Feature Space", fontsize=16)
     plt.xlabel("Principal Component 1", fontsize=14)
     plt.ylabel("Principal Component 2", fontsize=14)
@@ -506,9 +568,15 @@ def plot_pca_visualization(features, labels):
     print(f"前两个主成分累计解释的方差比例: {np.sum(explained_variance):.2%}")
 
 
-def plot_tsne_visualization(features, labels):
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
+def plot_tsne_visualization(features, labels, target_features):
+    scaler_source = StandardScaler()
+    source_features_scaled = scaler_source.fit_transform(features)
+    scaler_target = StandardScaler()
+    target_features_scaled = scaler_target.fit_transform(target_features)
+    features_scaled = np.vstack((source_features_scaled, target_features_scaled))
+    labels_source = labels.values
+    labels_target = np.array(["Target"] * target_features.shape[0])
+    combined_labels = np.concatenate((labels_source, labels_target))
     tsne = TSNE(
         n_components=2,
         perplexity=30,
@@ -519,12 +587,12 @@ def plot_tsne_visualization(features, labels):
     )
     tsne_results = tsne.fit_transform(features_scaled)
     tsne_df = pd.DataFrame(data=tsne_results, columns=["Dim1", "Dim2"])
-    tsne_df["Fault Type"] = labels.values
+    tsne_df["Domain"] = combined_labels
     plt.figure(figsize=(12, 9))
     sns.scatterplot(
         x="Dim1",
         y="Dim2",
-        hue="Fault Type",
+        hue="Domain",
         palette="Set2",
         data=tsne_df,
         legend="full",
@@ -535,7 +603,7 @@ def plot_tsne_visualization(features, labels):
     plt.title("t-SNE of the Feature Space", fontsize=16)
     plt.xlabel("t-SNE Dimension 1", fontsize=14)
     plt.ylabel("t-SNE Dimension 2", fontsize=14)
-    plt.legend(title="Fault Type", fontsize=12)
+    plt.legend(title="Domain / Fault Type", fontsize=12)
     plt.grid()
     plt.savefig(f"{PLOT_DIR}/tsne_feature_space.pdf")
     plt.close()
@@ -591,13 +659,19 @@ if __name__ == "__main__":
     warnings.simplefilter(action="ignore", category=FutureWarning)
     print("Building dataframe...")
     df = build_dataframe(FAULT_SOURCE_DIR)
+    target_df = build_target_dataframe(TARGET_DIR)
     print("Extracting features...")
     if READ_MODE:
         feature_df = pd.read_csv("features.csv")
+        target_feature_df = pd.read_csv("target_features.csv")
     else:
         feature_df = build_feature_dataframe(df)
+        target_feature_df = build_feature_dataframe(
+            target_df, sampling_rate=TARGET_SAMPLING_RATE
+        )
         print("Saving to features.csv...")
         feature_df.to_csv("features.csv", index=False)
+        target_feature_df.to_csv("target_features.csv", index=False)
     print("Plotting signals...")
     signals = get_different_fault_signals_index(df)
     # plot_original_signals(signals, df)
@@ -614,17 +688,25 @@ if __name__ == "__main__":
     features = feature_df.drop(columns=["fault_size", "load", "rpm"]).select_dtypes(
         include=np.number
     )
+    target_features = target_feature_df.drop(columns=["rpm"]).select_dtypes(
+        include=np.number
+    )
     labels = feature_df.loc[features.index, "fault_type"]
     print("Plotting PCA visualization...")
-    plot_pca_visualization(features, labels)
+    plot_pca_visualization(features, labels, target_features)
     print("Plotting t-SNE visualization...")
-    plot_tsne_visualization(features, labels)
+    plot_tsne_visualization(features, labels, target_features)
     print("Performing ReliefF feature selection...")
     perform_reliefF_feature_selection(features, labels)
     feature_sub_df = feature_df[
-        ["fault_type", "fault_size", "load", "rpm"] + features.columns.to_list()
+        ["fault_type", "fault_size", "load", "rpm", "source_index"]
+        + features.columns.to_list()
+    ]
+    target_feature_sub_df = target_feature_df[
+        ["rpm", "target_index"] + features.columns.to_list()
     ]
     feature_sub_df.to_csv("features_selected.csv", index=False)
+    target_feature_sub_df.to_csv("target_features_selected.csv", index=False)
     print("Plotting distributions...")
     plot_feature_map = {
         "wavelet_energy_0": (
