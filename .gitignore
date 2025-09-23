@@ -3,6 +3,7 @@ Q1.py
 *.ipynb
 test*
 *.docx
+spectrograms
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
