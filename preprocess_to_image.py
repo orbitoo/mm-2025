@@ -6,13 +6,12 @@ import numpy as np
 from tqdm import tqdm
 
 from question1 import (
-    SAMPLING_RATE,
     TARGET_SAMPLING_RATE,
     build_dataframe,
     build_target_dataframe,
-    FAULT_SOURCE_DIR,
-    NORMAL_SOURCE_DIR,
+    SOURCE_DIR,
     TARGET_DIR,
+    sliding_window,
 )
 
 N_FFT = 1024
@@ -42,14 +41,22 @@ def save_spectrogram(signal, sampling_rate, save_path):
 
 def process_source_data(df):
     print("Processing source domain data...")
-    for idx, row in tqdm(df.iterrows(), total=len(df)):
+    for _, row in tqdm(df.iterrows(), total=len(df)):
         fault_type = row["fault_type"]
         signal = row["signal"]
+        original_sampling_rate = row["sampling_rate"]
+        if original_sampling_rate != TARGET_SAMPLING_RATE:
+            signal = librosa.resample(
+                y=np.array(signal, dtype=np.float32),
+                orig_sr=original_sampling_rate,
+                target_sr=TARGET_SAMPLING_RATE,
+            )
         class_dir = os.path.join(SOURCE_IMG_DIR, fault_type)
         os.makedirs(class_dir, exist_ok=True)
-        filename = f"{row['source_index']}_{row['load']}_{row['fault_size']}_{idx}.png"
-        save_path = os.path.join(class_dir, filename)
-        save_spectrogram(signal, SAMPLING_RATE, save_path)
+        for idx, window in enumerate(sliding_window(signal)):
+            filename = f"{row['source_index']}_{original_sampling_rate / 1000}kHz_{row['sensor_type']}_{row['load']}_{row['fault_size']}_{idx}.png"
+            save_path = os.path.join(class_dir, filename)
+            save_spectrogram(window, TARGET_SAMPLING_RATE, save_path)
 
 
 def process_target_data(df):
@@ -64,7 +71,7 @@ def process_target_data(df):
 
 if __name__ == "__main__":
     print("Building source dataframe...")
-    df_source = build_dataframe(FAULT_SOURCE_DIR, NORMAL_SOURCE_DIR)
+    df_source = build_dataframe(SOURCE_DIR, use_sliding_window=False)
     print("Building target dataframe...")
     df_target = build_target_dataframe(TARGET_DIR)
     process_source_data(df_source)

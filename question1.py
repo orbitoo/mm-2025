@@ -19,19 +19,21 @@ from skrebate import ReliefF
 from tqdm import tqdm
 
 FAULT_TYPE_PAT = r"[/\\](B|IR|OR|N)(.*?)_\d\.mat$"
-FAULT_SIZE_PAT = rf"[/\\](\d{4})[/\\]"
-LOAD_PAT = r"_(\d)\.mat$"
-SENSOR_TYPE = "DE"
+FAULT_SIZE_PAT = r"[/\\](\d{4})[/\\]"
+ANOTHER_FAULT_RPM_PAT = r"[/\\](B|IR|OR|N)\d{3}_\d_\((\d{4})rpm\)\.mat$"
+LOAD_PAT = r"_(\d)(_\(\d{4}rpm\))?\.mat$"
+SENSOR_TYPE_PAT = r"_(DE|FE|BA)_"
 SOURCE_INDEX_PAT = r"(X\d+)_"
 TARGET_INDEX_PAT = r"([A-Z])\.mat$"
+SAMPLING_RATE_PAT = r"(\d{2})kHz"
 TARGET_RPM = 600
 WINDOW_SIZE = 8192
 OVERLAP = 4096
-FAULT_SOURCE_DIR = "./data/source_domain/48kHz_DE_data"
-NORMAL_SOURCE_DIR = "./data/source_domain/48kHz_Normal_data"
+SOURCE_DIR = "./data/source_domain"
 TARGET_DIR = "./data/target_domain"
 SAMPLING_RATE = 48000
 TARGET_SAMPLING_RATE = 32000
+SENSOR_TYPE = "DE"
 WAVELET_TYPE = "sym8"
 WAVELET_LEVEL = 4
 DENOISE_WAVELET_TYPE = "sym8"
@@ -45,6 +47,14 @@ PLOT_DIR = "fig/question1"
 PLOT_SIGNAL_LOAD = 1
 DISTRIBUTION_PLOT_TYPE = "violin"
 SELECT_N_FEATURES = 42
+LUCKY_SEED = 42
+
+
+def infer_sampling_rate(file_path):
+    match = re.search(SAMPLING_RATE_PAT, file_path)
+    if match:
+        return int(match.group(1)) * 1000
+    return 0
 
 
 def infer_fault_type(file_path):
@@ -83,6 +93,13 @@ def infer_source_index(str):
     return "Unknown"
 
 
+def infer_sensor_type(str):
+    match = re.search(SENSOR_TYPE_PAT, str)
+    if match:
+        return match.group(1)
+    return "Unknown"
+
+
 def infer_target_index(file_path):
     match = re.search(TARGET_INDEX_PAT, file_path)
     if match:
@@ -90,21 +107,34 @@ def infer_target_index(file_path):
     return "Unknown"
 
 
+def fallback_infer_fault_type_and_rpm(file_path):
+    match = re.search(ANOTHER_FAULT_RPM_PAT, file_path)
+    if match:
+        fault_type = match.group(1)
+        rpm_str = match.group(2)
+        return fault_type, int(rpm_str)
+    return "Unknown", -1
+
+
 def read_signal(mat_data, filter=True):
+    tuples = []
     if filter:
-        k = [key for key in mat_data.keys() if SENSOR_TYPE in key][0]
+        ks = [key for key in mat_data.keys() if "time" in key]
     else:
-        k = [key for key in mat_data.keys() if not key.startswith("__")][0]
-    signal = mat_data[k].flatten()
-    idx = infer_source_index(k)
-    return (signal, idx)
+        ks = [key for key in mat_data.keys() if not key.startswith("__")]
+    for k in ks:
+        signal = mat_data[k].flatten()
+        idx = infer_source_index(k)
+        sensor_type = infer_sensor_type(k)
+        tuples.append((signal, idx, sensor_type))
+    return tuples
 
 
 def read_mat_file(file_path, filter=True):
     mat_data = scipy.io.loadmat(file_path)
-    signal, idx = read_signal(mat_data, filter=filter)
+    tuples = read_signal(mat_data, filter=filter)
     rpm = infer_rpm(mat_data)
-    return signal, rpm, idx
+    return tuples, rpm
 
 
 def denoise_signal(signal, wavelet=DENOISE_WAVELET_TYPE):
@@ -125,35 +155,58 @@ def sliding_window(signal, window_size=WINDOW_SIZE, overlap=OVERLAP):
     return windows
 
 
-def build_dataframe(data_dir):
+def build_dataframe(fault_dir, use_sliding_window=True):
     dfs = []
 
     def process_dir(dir):
         for root, _, files in os.walk(dir):
             for file in files:
                 file_path = os.path.join(root, file)
-                signal, rpm, idx = read_mat_file(file_path)
-                denoised_signal = denoise_signal(signal)
-                windows = sliding_window(signal)
-                windows_denoised = sliding_window(denoised_signal)
+                tuples, rpm = read_mat_file(file_path)
                 fault_type = infer_fault_type(file_path)
                 fault_size = infer_fault_size(file_path)
+                if rpm == -1 or fault_type == "Unknown":
+                    fault_type, rpm = fallback_infer_fault_type_and_rpm(file_path)
                 load = infer_load(file_path)
-                df = pd.DataFrame(
-                    {
-                        "original_signal": windows,
-                        "signal": windows_denoised,
-                        "fault_type": fault_type,
-                        "fault_size": fault_size,
-                        "load": load,
-                        "rpm": rpm,
-                        "source_index": idx,
-                    }
-                )
-                dfs.append(df)
+                sampling_rate = infer_sampling_rate(file_path)
+                if use_sliding_window:
+                    for signal, idx, sensor_type in tuples:
+                        denoised_signal = denoise_signal(signal)
+                        windows = sliding_window(signal)
+                        windows_denoised = sliding_window(denoised_signal)
+                        df = pd.DataFrame(
+                            {
+                                "original_signal": windows,
+                                "signal": windows_denoised,
+                                "fault_type": fault_type,
+                                "fault_size": fault_size,
+                                "load": load,
+                                "rpm": rpm,
+                                "source_index": idx,
+                                "sampling_rate": sampling_rate,
+                                "sensor_type": sensor_type,
+                            }
+                        )
+                        dfs.append(df)
+                else:
+                    for signal, idx, sensor_type in tuples:
+                        denoised_signal = denoise_signal(signal)
+                        df = pd.DataFrame(
+                            {
+                                "original_signal": [signal],
+                                "signal": [denoised_signal],
+                                "fault_type": fault_type,
+                                "fault_size": fault_size,
+                                "load": load,
+                                "rpm": rpm,
+                                "source_index": idx,
+                                "sampling_rate": sampling_rate,
+                                "sensor_type": sensor_type,
+                            }
+                        )
+                        dfs.append(df)
 
-    process_dir(FAULT_SOURCE_DIR)
-    process_dir(NORMAL_SOURCE_DIR)
+    process_dir(fault_dir)
     return pd.concat(dfs, ignore_index=True)
 
 
@@ -162,20 +215,22 @@ def build_target_dataframe(data_dir):
     for root, _, files in os.walk(data_dir):
         for file in files:
             file_path = os.path.join(root, file)
-            signal, rpm, _ = read_mat_file(file_path, filter=False)
+            tuples, rpm = read_mat_file(file_path, filter=False)
             idx = infer_target_index(file_path)
-            denoised_signal = denoise_signal(signal)
-            windows = sliding_window(signal)
-            windows_denoised = sliding_window(denoised_signal)
-            df = pd.DataFrame(
-                {
-                    "original_signal": windows,
-                    "signal": windows_denoised,
-                    "rpm": TARGET_RPM,
-                    "target_index": idx,
-                }
-            )
-            dfs.append(df)
+            for signal, _, _ in tuples:
+                denoised_signal = denoise_signal(signal)
+                windows = sliding_window(signal)
+                windows_denoised = sliding_window(denoised_signal)
+                df = pd.DataFrame(
+                    {
+                        "original_signal": windows,
+                        "signal": windows_denoised,
+                        "rpm": TARGET_RPM,
+                        "target_index": idx,
+                        "sampling_rate": TARGET_SAMPLING_RATE,
+                    }
+                )
+                dfs.append(df)
     return pd.concat(dfs, ignore_index=True)
 
 
@@ -286,10 +341,11 @@ def extract_features(signal, sampling_rate=SAMPLING_RATE):
     return features
 
 
-def build_feature_dataframe(df, sampling_rate=SAMPLING_RATE):
+def build_feature_dataframe(df):
     tqdm.pandas(desc="Extracting features")
     feature_df = df.progress_apply(
-        lambda row: extract_features(row["signal"], sampling_rate=sampling_rate), axis=1
+        lambda row: extract_features(row["signal"], sampling_rate=row["sampling_rate"]),
+        axis=1,
     ).apply(pd.Series)
     feature_df = df.join(feature_df)
     feature_df = feature_df.drop(columns=["signal", "original_signal"])
@@ -581,7 +637,7 @@ def plot_tsne_visualization(features, labels, target_features):
         n_components=2,
         perplexity=30,
         n_iter_without_progress=3000,
-        random_state=42,
+        random_state=LUCKY_SEED,
         init="pca",
         learning_rate="auto",
     )
@@ -658,17 +714,20 @@ READ_MODE = True
 if __name__ == "__main__":
     warnings.simplefilter(action="ignore", category=FutureWarning)
     print("Building dataframe...")
-    df = build_dataframe(FAULT_SOURCE_DIR)
+    df = build_dataframe(SOURCE_DIR)
+
     target_df = build_target_dataframe(TARGET_DIR)
+    # filter df
+    df = df[
+        df["sampling_rate"] == SAMPLING_RATE and df["sensor_type"] == SENSOR_TYPE
+    ].reset_index()
     print("Extracting features...")
     if READ_MODE:
         feature_df = pd.read_csv("features.csv")
         target_feature_df = pd.read_csv("target_features.csv")
     else:
         feature_df = build_feature_dataframe(df)
-        target_feature_df = build_feature_dataframe(
-            target_df, sampling_rate=TARGET_SAMPLING_RATE
-        )
+        target_feature_df = build_feature_dataframe(target_df)
         print("Saving to features.csv...")
         feature_df.to_csv("features.csv", index=False)
         target_feature_df.to_csv("target_features.csv", index=False)
@@ -685,12 +744,12 @@ if __name__ == "__main__":
     print("Plotting ball fault envelope...")
     plot_ball_fault_envelope_bsf(df)
     plot_ball_fault_envelope_ftf(df)
-    features = feature_df.drop(columns=["fault_size", "load", "rpm"]).select_dtypes(
-        include=np.number
-    )
-    target_features = target_feature_df.drop(columns=["rpm"]).select_dtypes(
-        include=np.number
-    )
+    features = feature_df.drop(
+        columns=["fault_size", "load", "rpm", "sampling_rate"]
+    ).select_dtypes(include=np.number)
+    target_features = target_feature_df.drop(
+        columns=["rpm", "sampling_rate"]
+    ).select_dtypes(include=np.number)
     labels = feature_df.loc[features.index, "fault_type"]
     print("Plotting PCA visualization...")
     plot_pca_visualization(features, labels, target_features)
@@ -699,11 +758,19 @@ if __name__ == "__main__":
     print("Performing ReliefF feature selection...")
     perform_reliefF_feature_selection(features, labels)
     feature_sub_df = feature_df[
-        ["fault_type", "fault_size", "load", "rpm", "source_index"]
+        [
+            "fault_type",
+            "fault_size",
+            "load",
+            "rpm",
+            "source_index",
+            "sampling_rate",
+            "sensor_type",
+        ]
         + features.columns.to_list()
     ]
     target_feature_sub_df = target_feature_df[
-        ["rpm", "target_index"] + features.columns.to_list()
+        ["rpm", "target_index", "sampling_rate"] + features.columns.to_list()
     ]
     feature_sub_df.to_csv("features_selected.csv", index=False)
     target_feature_sub_df.to_csv("target_features_selected.csv", index=False)

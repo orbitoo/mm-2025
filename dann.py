@@ -37,21 +37,20 @@ class DANN(nn.Module):
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.AdaptiveAvgPool2d((1, 1)),
         )
+        feature_dim = 128
         self.label_predictor = nn.Sequential(
-            nn.Linear(128 * 8 * 8, 1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(1024, 512),
+            nn.Linear(feature_dim, 512),
             nn.ReLU(inplace=True),
             nn.Dropout(0.5),
             nn.Linear(512, num_classes),
         )
         self.domain_discriminator = nn.Sequential(
-            nn.Linear(128 * 8 * 8, 1024),
+            nn.Linear(feature_dim, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(0.5),
-            nn.Linear(1024, 2),
+            nn.Linear(256, 2),
         )
         self.grl = GradientReversalFunction.apply
 
@@ -61,7 +60,7 @@ class DANN(nn.Module):
         reversed_features = self.grl(features_flat, alpha)
         domain_output = self.domain_discriminator(reversed_features)
         class_output = self.label_predictor(features_flat)
-        return class_output, domain_output
+        return features_flat, class_output, domain_output
 
 
 if __name__ == "__main__":
