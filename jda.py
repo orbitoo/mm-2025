@@ -1,3 +1,6 @@
+# 本程序及代码是在人工智能工具辅助下完成的
+# DeepSeek, DeepSeek-R1-0528, 深度求索 (DeepSeek), 2025-09-23
+
 import numpy as np
 import scipy.linalg
 from sklearn.neighbors import KNeighborsClassifier
